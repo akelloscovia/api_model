@@ -1,0 +1,12 @@
+{
+    "model_type": "custom_cnn",
+    "model_file": "cattle_weight_cnn_best.keras",
+    "image_width": 224,
+    "image_height": 224,
+    "channels": 3,
+    "pixel_scaling": "divide_by_255",
+    "target_normalization": "standardization",
+    "target_mean_kg": 160.60294951786727,
+    "target_std_kg": 36.74140080538368,
+    "output_unit": "kg"
+}

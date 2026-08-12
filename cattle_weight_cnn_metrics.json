@@ -1,0 +1,24 @@
+{
+    "model_file": "cattle_weight_cnn_best.keras",
+    "test_samples": 1113,
+    "test_mae_kg": 25.003055572509766,
+    "test_rmse_kg": 34.75696696965498,
+    "test_r2": 0.06881755590438843,
+    "prediction_mean_kg": 160.6669921875,
+    "prediction_std_kg": 8.032325744628906,
+    "prediction_min_kg": 147.400390625,
+    "prediction_max_kg": 211.39785766601562,
+    "true_mean_kg": 162.221923828125,
+    "true_std_kg": 36.01840591430664,
+    "true_min_kg": 61.0,
+    "true_max_kg": 300.0,
+    "prediction_true_std_ratio": 0.22300614416599274,
+    "prediction_weight_correlation": 0.26997675418075273,
+    "image_size": [
+        224,
+        224
+    ],
+    "pixel_scaling": "divide_by_255",
+    "target_mean_kg": 160.60294951786727,
+    "target_std_kg": 36.74140080538368
+}
