@@ -15,7 +15,7 @@ app = FastAPI(title="Cattle Weight Prediction API")
 
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_PATH = BASE_DIR / "best_cattle_weight_model.keras"
+MODEL_PATH = BASE_DIR / "cattle_weight_cnn_best.keras"
 
 IMG_HEIGHT = 224
 IMG_WIDTH = 224
