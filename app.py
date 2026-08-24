@@ -3,22 +3,49 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from PIL import Image
-
-app = FastAPI(title="Cattle Weight Prediction API")
+from ultralytics import YOLO
 
 
 # ============================================================
-# MODEL CONFIGURATION
+# FASTAPI APPLICATION
+# ============================================================
+
+app = FastAPI(
+    title="Cattle Weight Prediction API",
+    description="Detects cattle first, then predicts cattle weight.",
+    version="2.0.0"
+)
+
+
+# ============================================================
+# PATH CONFIGURATION
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_PATH = BASE_DIR / "cattle_weight_cnn_best.keras"
+WEIGHT_MODEL_PATH = BASE_DIR / "cattle_weight_cnn_best.keras"
+YOLO_MODEL_PATH = BASE_DIR / "yolo11n.pt"
+
+
+# ============================================================
+# IMAGE CONFIGURATION
+# ============================================================
 
 IMG_HEIGHT = 224
 IMG_WIDTH = 224
+
+
+# ============================================================
+# CATTLE DETECTION CONFIGURATION
+# ============================================================
+
+# COCO class ID for cow
+COW_CLASS_ID = 19
+
+# Minimum confidence required for YOLO to accept a cow
+CATTLE_DETECTION_THRESHOLD = 0.40
 
 
 # ============================================================
@@ -41,36 +68,70 @@ TRAIN_STD = 36.01840591430664
 
 
 # ============================================================
-# LOAD MODEL
+# LOAD CATTLE WEIGHT MODEL
 # ============================================================
 
-print("========================================")
-print("Loading Cattle Weight Model")
-print("========================================")
+print("=" * 60)
+print("LOADING CATTLE WEIGHT MODEL")
+print("=" * 60)
 
-print("BASE_DIR:", BASE_DIR)
-print("MODEL_PATH:", MODEL_PATH)
-print("MODEL EXISTS:", MODEL_PATH.exists())
+print("Weight model path:")
+print(WEIGHT_MODEL_PATH)
 
-if not MODEL_PATH.exists():
+if not WEIGHT_MODEL_PATH.exists():
+
     raise FileNotFoundError(
-        f"Model file not found: {MODEL_PATH}"
+        f"Cattle weight model not found: {WEIGHT_MODEL_PATH}"
     )
 
-model = tf.keras.models.load_model(
-    MODEL_PATH,
+weight_model = tf.keras.models.load_model(
+    WEIGHT_MODEL_PATH,
     compile=False
 )
 
-print("Model loaded successfully!")
-print("========================================")
+print("Cattle weight model loaded successfully!")
+
+print("Input shape:", weight_model.input_shape)
+print("Output shape:", weight_model.output_shape)
 
 
 # ============================================================
-# IMAGE PREPROCESSING
+# LOAD YOLO MODEL
+# ============================================================
+
+print("=" * 60)
+print("LOADING YOLO CATTLE DETECTOR")
+print("=" * 60)
+
+print("YOLO model path:")
+print(YOLO_MODEL_PATH)
+
+if not YOLO_MODEL_PATH.exists():
+
+    raise FileNotFoundError(
+        f"YOLO model not found: {YOLO_MODEL_PATH}"
+    )
+
+cattle_detector = YOLO(
+    str(YOLO_MODEL_PATH)
+)
+
+print("YOLO model loaded successfully!")
+
+print("Cow class ID:", COW_CLASS_ID)
+print("Cow class name:", cattle_detector.names[COW_CLASS_ID])
+
+
+# ============================================================
+# IMAGE PREPROCESSING FOR WEIGHT MODEL
 # ============================================================
 
 def preprocess_image(image_bytes: bytes):
+
+    """
+    Convert uploaded image into the format
+    expected by the cattle weight model.
+    """
 
     img = Image.open(
         io.BytesIO(image_bytes)
@@ -94,6 +155,93 @@ def preprocess_image(image_bytes: bytes):
 
 
 # ============================================================
+# CATTLE DETECTION
+# ============================================================
+
+def detect_cattle(image_bytes: bytes):
+
+    """
+    Run YOLO before the weight model.
+
+    Returns:
+
+        {
+            "cattle_detected": True/False,
+            "confidence": highest cow confidence,
+            "detections": [...]
+        }
+    """
+
+    image = Image.open(
+        io.BytesIO(image_bytes)
+    ).convert("RGB")
+
+    # Run YOLO
+    results = cattle_detector.predict(
+        source=image,
+        conf=CATTLE_DETECTION_THRESHOLD,
+        verbose=False
+    )
+
+    detections = []
+
+    highest_cow_confidence = 0.0
+
+    for result in results:
+
+        if result.boxes is None:
+            continue
+
+        for box in result.boxes:
+
+            class_id = int(
+                box.cls[0].item()
+            )
+
+            confidence = float(
+                box.conf[0].item()
+            )
+
+            class_name = cattle_detector.names[
+                class_id
+            ]
+
+            detections.append(
+                {
+                    "class": class_name,
+                    "confidence": round(
+                        confidence,
+                        3
+                    )
+                }
+            )
+
+            # Check specifically for cow
+            if class_id == COW_CLASS_ID:
+
+                highest_cow_confidence = max(
+                    highest_cow_confidence,
+                    confidence
+                )
+
+    cattle_detected = (
+        highest_cow_confidence
+        >= CATTLE_DETECTION_THRESHOLD
+    )
+
+    return {
+        "cattle_detected": cattle_detected,
+
+        "confidence": round(
+            highest_cow_confidence,
+            3
+        ),
+
+        "detections": detections
+    }
+
+
+# ============================================================
 # CONFIDENCE ESTIMATION
 # ============================================================
 
@@ -105,7 +253,9 @@ def estimate_confidence(weight):
 
     confidence = max(
         5.0,
-        100.0 * np.exp(-0.5 * z ** 2)
+        100.0 * np.exp(
+            -0.5 * z ** 2
+        )
     )
 
     return float(confidence)
@@ -118,6 +268,7 @@ def estimate_confidence(weight):
 def estimate_accuracy(weight):
 
     if weight <= 0:
+
         return 0.0
 
     error_pct = (
@@ -136,7 +287,7 @@ def estimate_accuracy(weight):
 
 
 # ============================================================
-# PREDICTION ENDPOINT
+# MAIN PREDICTION ENDPOINT
 # ============================================================
 
 @app.post("/predict")
@@ -144,22 +295,109 @@ async def predict(
     file: UploadFile = File(...)
 ):
 
+    # --------------------------------------------------------
+    # STEP 1 — READ IMAGE
+    # --------------------------------------------------------
+
     contents = await file.read()
+
+    if not contents:
+
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is empty."
+        )
+
+    # --------------------------------------------------------
+    # STEP 2 — CHECK THAT FILE IS AN IMAGE
+    # --------------------------------------------------------
+
+    try:
+
+        Image.open(
+            io.BytesIO(contents)
+        ).verify()
+
+    except Exception:
+
+        return {
+            "valid": False,
+            "cattle_detected": False,
+            "message": (
+                "Invalid file. "
+                "Please upload a valid image."
+            )
+        }
+
+    # --------------------------------------------------------
+    # STEP 3 — RUN CATTLE DETECTION
+    # --------------------------------------------------------
+
+    detection = detect_cattle(
+        contents
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # If there is NO cattle:
+    #
+    # STOP HERE.
+    #
+    # The TensorFlow weight model will NOT run.
+    # --------------------------------------------------------
+
+    if not detection["cattle_detected"]:
+
+        return {
+
+            "valid": False,
+
+            "cattle_detected": False,
+
+            "message": (
+                "Invalid image. "
+                "No cattle detected. "
+                "Please upload an image containing cattle."
+            ),
+
+            "detections": detection[
+                "detections"
+            ]
+        }
+
+    # --------------------------------------------------------
+    # STEP 4 — CATTLE WAS DETECTED
+    # --------------------------------------------------------
 
     processed_image = preprocess_image(
         contents
     )
 
-    prediction = model.predict(
+    # --------------------------------------------------------
+    # STEP 5 — PREDICT WEIGHT
+    # --------------------------------------------------------
+
+    prediction = weight_model.predict(
         processed_image,
         verbose=0
     )
 
-    # Model outputs standardized weight
     predicted_weight = float(
-        prediction[0][0] * TARGET_STD
+        prediction[0][0]
+        * TARGET_STD
         + TARGET_MEAN
     )
+
+    # Prevent negative weight
+    predicted_weight = max(
+        0.0,
+        predicted_weight
+    )
+
+    # --------------------------------------------------------
+    # STEP 6 — CALCULATE METRICS
+    # --------------------------------------------------------
 
     confidence = estimate_confidence(
         predicted_weight
@@ -169,11 +407,31 @@ async def predict(
         predicted_weight
     )
 
-    lower = predicted_weight - RMSE
-    upper = predicted_weight + RMSE
+    lower = max(
+        0.0,
+        predicted_weight - RMSE
+    )
+
+    upper = (
+        predicted_weight + RMSE
+    )
+
+    # --------------------------------------------------------
+    # STEP 7 — RETURN RESULT
+    # --------------------------------------------------------
 
     return {
-        "filename": file.filename,
+
+        "valid": True,
+
+        "cattle_detected": True,
+
+        "animal": "cow",
+
+        "detection_confidence_percent": round(
+            detection["confidence"] * 100,
+            1
+        ),
 
         "predicted_weight_kg": round(
             predicted_weight,
@@ -191,10 +449,12 @@ async def predict(
         ),
 
         "confidence_interval_kg": {
+
             "lower": round(
                 lower,
                 1
             ),
+
             "upper": round(
                 upper,
                 1
@@ -209,7 +469,9 @@ async def predict(
         "model_rmse_kg": round(
             RMSE,
             1
-        )
+        ),
+
+        "filename": file.filename
     }
 
 
@@ -221,9 +483,24 @@ async def predict(
 def root():
 
     return {
+
         "status": "online",
-        "message": "Cattle Weight Prediction API",
-        "model_loaded": model is not None
+
+        "message": (
+            "Cattle Weight Prediction API"
+        ),
+
+        "cattle_detector_loaded": (
+            cattle_detector is not None
+        ),
+
+        "weight_model_loaded": (
+            weight_model is not None
+        ),
+
+        "cattle_detection_threshold": (
+            CATTLE_DETECTION_THRESHOLD
+        )
     }
 
 

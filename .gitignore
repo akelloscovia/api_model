@@ -1,0 +1,28 @@
+# Python virtual environments
+.venv/
+.venv312/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables
+.env
+
+# YOLO / large model files
+*.pt
+*.onnx
+*.h5
+*.keras
+
+# Test images
+*.jpg
+*.jpeg
+*.png
+
+# IDE
+.vscode/
+.idea/
