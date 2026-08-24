@@ -1,5 +1,6 @@
 # Python virtual environments
 .venv/
+.venv-1/
 .venv312/
 venv/
 env/
@@ -11,12 +12,6 @@ __pycache__/
 
 # Environment variables
 .env
-
-# YOLO / large model files
-*.pt
-*.onnx
-*.h5
-*.keras
 
 # Test images
 *.jpg
