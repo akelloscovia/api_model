@@ -1,13 +1,26 @@
 import io
+import os
 import threading
 from pathlib import Path
 
+# Render's free/starter CPU is a heavily throttled fractional core. PyTorch's
+# default thread pool spawns a thread per visible logical core, which under
+# that kind of cgroup CPU limit spends more time context-switching than
+# computing. Pin to a single thread before torch is imported (OMP/MKL read
+# these env vars at init) — this is a pure threading change, no precision
+# impact, and cuts inference time dramatically on constrained CPUs.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import numpy as np
+import torch
 from ai_edge_litert.interpreter import Interpreter
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 from ultralytics import YOLO
+
+torch.set_num_threads(1)
 
 
 # ============================================================
