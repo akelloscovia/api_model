@@ -43,3 +43,4 @@ ultralytics-platform==0.1.7
 ultralytics-thop==2.1.6
 urllib3==2.7.0
 uvicorn[standard]>=0.32.0
+gunicorn
