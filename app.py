@@ -219,6 +219,7 @@ def detect_cattle(image_bytes: bytes):
     results = cattle_detector.predict(
         source=image,
         conf=CATTLE_DETECTION_THRESHOLD,
+        imgsz=320,
         verbose=False
     )
 
