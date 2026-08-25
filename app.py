@@ -474,7 +474,11 @@ async def predict(
             1
         ),
 
-        "filename": file.filename
+        "filename": file.filename,
+
+        "detections": detection[
+            "detections"
+        ]
     }
 
 
