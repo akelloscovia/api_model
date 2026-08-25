@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 from ultralytics import YOLO
 
@@ -333,7 +334,8 @@ async def predict(
     # STEP 3 — RUN CATTLE DETECTION
     # --------------------------------------------------------
 
-    detection = detect_cattle(
+    detection = await run_in_threadpool(
+        detect_cattle,
         contents
     )
 
@@ -378,7 +380,8 @@ async def predict(
     # STEP 5 — PREDICT WEIGHT
     # --------------------------------------------------------
 
-    prediction = weight_model.predict(
+    prediction = await run_in_threadpool(
+        weight_model.predict,
         processed_image,
         verbose=0
     )
