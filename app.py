@@ -1,8 +1,9 @@
 import io
+import threading
 from pathlib import Path
 
 import numpy as np
-import tensorflow as tf
+from ai_edge_litert.interpreter import Interpreter
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from PIL import Image
@@ -26,7 +27,7 @@ app = FastAPI(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-WEIGHT_MODEL_PATH = BASE_DIR / "cattle_weight_cnn_best.keras"
+WEIGHT_MODEL_PATH = BASE_DIR / "cattle_weight_cnn_best.tflite"
 YOLO_MODEL_PATH = BASE_DIR / "yolo11n.pt"
 
 
@@ -85,15 +86,39 @@ if not WEIGHT_MODEL_PATH.exists():
         f"Cattle weight model not found: {WEIGHT_MODEL_PATH}"
     )
 
-weight_model = tf.keras.models.load_model(
-    WEIGHT_MODEL_PATH,
-    compile=False
+weight_interpreter = Interpreter(
+    model_path=str(WEIGHT_MODEL_PATH)
 )
+
+weight_interpreter.allocate_tensors()
+
+weight_input_details = weight_interpreter.get_input_details()
+weight_output_details = weight_interpreter.get_output_details()
+
+# tflite Interpreter.invoke() is not thread-safe; the threadpool used for
+# inference can run multiple requests concurrently on this one instance.
+weight_interpreter_lock = threading.Lock()
 
 print("Cattle weight model loaded successfully!")
 
-print("Input shape:", weight_model.input_shape)
-print("Output shape:", weight_model.output_shape)
+print("Input shape:", weight_input_details[0]["shape"])
+print("Output shape:", weight_output_details[0]["shape"])
+
+
+def predict_weight(processed_image):
+
+    with weight_interpreter_lock:
+
+        weight_interpreter.set_tensor(
+            weight_input_details[0]["index"],
+            processed_image
+        )
+
+        weight_interpreter.invoke()
+
+        return weight_interpreter.get_tensor(
+            weight_output_details[0]["index"]
+        )
 
 
 # ============================================================
@@ -381,9 +406,8 @@ async def predict(
     # --------------------------------------------------------
 
     prediction = await run_in_threadpool(
-        weight_model.predict,
-        processed_image,
-        verbose=0
+        predict_weight,
+        processed_image
     )
 
     predicted_weight = float(
@@ -502,7 +526,7 @@ def root():
         ),
 
         "weight_model_loaded": (
-            weight_model is not None
+            weight_interpreter is not None
         ),
 
         "cattle_detection_threshold": (
